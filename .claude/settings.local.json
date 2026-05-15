@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cd d:\\\\klepserforensics\\\\solidarity-harmonydagger; Get-ChildItem -Recurse -Force | Where-Object { -not $_.PSIsContainer } | Select-Object FullName | Sort-Object FullName)"
+    ]
+  }
+}
