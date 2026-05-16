@@ -15,9 +15,9 @@ def main():
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
     app = QApplication(sys.argv)
-    app.setApplicationName("Solidarity - Based on HarmonyDagger")
-    app.setApplicationDisplayName("Solidarity - Based on HarmonyDagger")
-    app.setApplicationVersion("0.4.0")
+    app.setApplicationName("Solidarity")
+    app.setApplicationDisplayName("Solidarity")
+    app.setApplicationVersion("0.1.0")
     app.setOrganizationName("Jordan Klepser")
 
     window = MainWindow()

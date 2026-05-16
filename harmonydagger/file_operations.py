@@ -26,6 +26,38 @@ from .core import apply_noise_multichannel
 logger = logging.getLogger(__name__)
 
 
+def _get_mp3_bitrate(file_path: str) -> str:
+    """Detect MP3 bitrate via ffprobe; fall back to 192k."""
+    try:
+        import json
+        import subprocess
+        result = subprocess.run(
+            ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', file_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            for stream in json.loads(result.stdout).get('streams', []):
+                if stream.get('codec_type') == 'audio' and 'bit_rate' in stream:
+                    kbps = max(32, min(320, int(stream['bit_rate']) // 1000))
+                    return f"{kbps}k"
+    except Exception:
+        pass
+    return '192k'
+
+
+def _wav_subtype(input_subtype: Optional[str]) -> str:
+    _valid = {'PCM_S8', 'PCM_U8', 'PCM_16', 'PCM_24', 'PCM_32', 'FLOAT', 'DOUBLE'}
+    return input_subtype if input_subtype in _valid else 'PCM_16'
+
+
+def _flac_subtype(input_subtype: Optional[str]) -> str:
+    if input_subtype == 'PCM_S8':
+        return 'PCM_S8'
+    if input_subtype == 'PCM_16':
+        return 'PCM_16'
+    return 'PCM_24'
+
+
 def process_audio_file(
     file_path: str,
     output_path: Optional[str] = None,
@@ -74,6 +106,18 @@ def process_audio_file(
             base, ext = os.path.splitext(file_path)
             output_path = f"{base}_protected{ext}"
 
+        # Capture input metadata for faithful output (bit depth, MP3 bitrate)
+        _input_ext = os.path.splitext(file_path)[1].lower()
+        _input_subtype: Optional[str] = None
+        _mp3_bitrate = '192k'
+        try:
+            if _input_ext in ('.wav', '.flac', '.ogg'):
+                _input_subtype = sf.info(file_path).subtype
+            elif _input_ext == '.mp3':
+                _mp3_bitrate = _get_mp3_bitrate(file_path)
+        except Exception:
+            pass
+
         # Load audio
         y, sr = librosa.load(file_path, sr=None, mono=force_mono)
 
@@ -104,6 +148,9 @@ def process_audio_file(
             os.makedirs(output_dir, exist_ok=True)
             logger.debug(f"Created output directory: {output_dir}")
 
+        # soundfile expects (frames, channels); librosa/apply_noise_multichannel returns (channels, frames)
+        y_sf = y_processed.T if y_processed.ndim == 2 else y_processed
+
         # Save processed audio based on format
         try:
             if ext == '.mp3':
@@ -128,7 +175,7 @@ def process_audio_file(
                         if not save_wav_file(temp_wav_path, y_processed, sr):
                             # If our utility fails, try soundfile directly
                             logger.warning("Using soundfile for temporary WAV")
-                            sf.write(temp_wav_path, y_processed, sr, format='WAV')
+                            sf.write(temp_wav_path, y_sf, sr, format='WAV')
 
                         try:
                             logger.debug(f"Converting WAV to MP3: {output_path}")
@@ -143,7 +190,7 @@ def process_audio_file(
                                 frame_rate=sr,
                                 channels=2 if y_processed.ndim > 1 else 1
                             )
-                            raw_audio.export(output_path, format="mp3", bitrate="192k")
+                            raw_audio.export(output_path, format="mp3", bitrate=_mp3_bitrate)
                             logger.debug(f"Successfully created MP3 file: {output_path}")
                         except Exception as mp3_error:
                             logger.error(f"Error in MP3 export: {str(mp3_error)}")
@@ -190,32 +237,33 @@ def process_audio_file(
             elif ext in ['.flac', '.ogg', '.wav']:
                 try:
                     if ext == '.wav':
-                        from .wav_utils import save_wav_file
-                        success = save_wav_file(output_path, y_processed, sr)
-                        if success:
-                            logger.debug(f"Saved audio as WAV using wav_utils: {output_path}")
-                        else:
-                            logger.warning("Fallback to soundfile for WAV saving")
-                            sf.write(output_path, y_processed, sr, format='WAV')
+                        try:
+                            sf.write(output_path, y_sf, sr, subtype=_wav_subtype(_input_subtype))
+                            logger.debug(f"Saved audio as WAV ({_wav_subtype(_input_subtype)}): {output_path}")
+                        except Exception:
+                            from .wav_utils import save_wav_file
+                            logger.warning("Falling back to wav_utils for WAV saving")
+                            if not save_wav_file(output_path, y_processed, sr):
+                                raise
                     elif ext == '.flac':
-                        sf.write(output_path, y_processed, sr, format='FLAC')
-                        logger.debug(f"Saved audio as FLAC: {output_path}")
+                        sf.write(output_path, y_sf, sr, format='FLAC', subtype=_flac_subtype(_input_subtype))
+                        logger.debug(f"Saved audio as FLAC ({_flac_subtype(_input_subtype)}): {output_path}")
                     elif ext == '.ogg':
-                        sf.write(output_path, y_processed, sr, format='OGG')
+                        sf.write(output_path, y_sf, sr, format='OGG')
                         logger.debug(f"Saved audio as OGG: {output_path}")
                 except Exception as format_error:
                     logger.error(f"Error saving in {ext} format: {str(format_error)}. Falling back to WAV with .wav extension.")
                     output_path = os.path.splitext(output_path)[0] + ".wav"
                     from .wav_utils import save_wav_file
                     if not save_wav_file(output_path, y_processed, sr):
-                        sf.write(output_path, y_processed, sr, format='WAV')
+                        sf.write(output_path, y_sf, sr, format='WAV')
             else:
                 logger.warning(f"Unsupported format: {ext}. Defaulting to WAV.")
                 if not ext:
                     output_path = output_path + ".wav"
                 else:
                     output_path = os.path.splitext(output_path)[0] + ".wav"
-                sf.write(output_path, y_processed, sr, format='WAV')
+                sf.write(output_path, y_sf, sr, format='WAV')
                 logger.debug(f"Saved audio in WAV format: {output_path}")
         except Exception as e:
             logger.error(f"Error saving audio: {str(e)}")

@@ -1,12 +1,9 @@
 """Main application window."""
-from pathlib import Path
-
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QPalette, QColor
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QStatusBar, QLabel, QPushButton, QProgressBar,
-    QTabWidget, QSizePolicy,
 )
 
 from .widgets.file_panel import FilePanel
@@ -20,23 +17,6 @@ QMainWindow, QWidget {
     color: #cdd6f4;
     font-family: "Segoe UI", "SF Pro Display", sans-serif;
     font-size: 13px;
-}
-QTabWidget::pane {
-    border: 1px solid #45475a;
-    border-radius: 6px;
-}
-QTabBar::tab {
-    background: #313244;
-    color: #a6adc8;
-    padding: 8px 18px;
-    border-top-left-radius: 6px;
-    border-top-right-radius: 6px;
-    margin-right: 2px;
-}
-QTabBar::tab:selected {
-    background: #89b4fa;
-    color: #1e1e2e;
-    font-weight: bold;
 }
 QPushButton#processBtn {
     background-color: #89b4fa;
@@ -65,13 +45,13 @@ QStatusBar { background: #181825; color: #6c7086; }
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("HarmonyDagger — Audio AI Protection")
+        self.setWindowTitle("Solidarity - Artist Independence from AI Scraping - Based on HarmonyDagger")
         self.setMinimumSize(960, 640)
-        self.resize(1100, 720)
         self.setStyleSheet(_STYLE)
 
         self._worker: ProcessWorker | None = None
         self._setup_ui()
+        self._initial_sized = False
 
     def _setup_ui(self):
         central = QWidget()
@@ -81,28 +61,38 @@ class MainWindow(QMainWindow):
         root.setSpacing(10)
 
         # Header
-        header = QLabel("HarmonyDagger")
+        header = QLabel("Solidarity - Artist Independence from AI Scraping")
         header.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         header.setStyleSheet("color: #89b4fa; padding-bottom: 2px;")
-        subtitle = QLabel("Protect your audio against AI voice cloning and generative models")
+        subtitle = QLabel("Protect your audio against use by generative AI or unauthorized scraping.")
         subtitle.setStyleSheet("color: #6c7086; font-size: 12px;")
         root.addWidget(header)
         root.addWidget(subtitle)
 
-        # Tabs: Single File / Batch
-        self._tabs = QTabWidget()
-        root.addWidget(self._tabs, stretch=1)
+        # File panel
+        self._file_panel = FilePanel()
+        root.addWidget(self._file_panel)
 
-        self._build_single_tab()
-        self._build_batch_tab()
+        # Horizontal splitter: settings | log
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+
+        self._settings_panel = SettingsPanel()
+        splitter.addWidget(self._settings_panel)
+
+        self._log_panel = LogPanel()
+        splitter.addWidget(self._log_panel)
+
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 3)
+        root.addWidget(splitter, stretch=1)
 
         # Bottom bar: progress + button
         bottom = QHBoxLayout()
         bottom.setSpacing(12)
 
         self._progress = QProgressBar()
-        self._progress.setRange(0, 0)  # indeterminate initially
-        self._progress.setRange(0, 1)  # hide until processing
+        self._progress.setRange(0, 1)
         self._progress.setValue(0)
         self._progress.setVisible(False)
         self._progress.setFixedHeight(10)
@@ -122,60 +112,7 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self._status_bar)
         self._status_bar.showMessage("Ready")
 
-    def _build_single_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
-
-        self._file_panel = FilePanel(batch_mode=False)
-        layout.addWidget(self._file_panel)
-
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setChildrenCollapsible(False)
-
-        self._settings_panel = SettingsPanel()
-        splitter.addWidget(self._settings_panel)
-
-        self._log_panel = LogPanel()
-        splitter.addWidget(self._log_panel)
-
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
-        layout.addWidget(splitter, stretch=1)
-
-        self._tabs.addTab(tab, "Single File")
-
-    def _build_batch_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
-
-        self._batch_file_panel = FilePanel(batch_mode=True)
-        layout.addWidget(self._batch_file_panel)
-
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setChildrenCollapsible(False)
-
-        self._batch_settings_panel = SettingsPanel(show_batch_options=True)
-        splitter.addWidget(self._batch_settings_panel)
-
-        self._batch_log_panel = LogPanel()
-        splitter.addWidget(self._batch_log_panel)
-
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
-        layout.addWidget(splitter, stretch=1)
-
-        self._tabs.addTab(tab, "Batch Folder")
-
     # ------------------------------------------------------------------
-    def _active_panels(self):
-        if self._tabs.currentIndex() == 0:
-            return self._file_panel, self._settings_panel, self._log_panel
-        return self._batch_file_panel, self._batch_settings_panel, self._batch_log_panel
-
     def _on_process(self):
         if self._worker and self._worker.isRunning():
             self._worker.requestInterruption()
@@ -184,29 +121,28 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage("Cancelled")
             return
 
-        file_panel, settings_panel, log_panel = self._active_panels()
-        input_path = file_panel.input_path()
-        output_path = file_panel.output_path()
+        input_paths = self._file_panel.input_paths()
+        output_path = self._file_panel.output_path()
 
-        if not input_path:
+        if not input_paths:
             self._status_bar.showMessage("Please select an input file or folder first.")
             return
 
-        params = settings_panel.get_params()
-        params["input"] = input_path
+        params = self._settings_panel.get_params()
+        params["inputs"] = input_paths
         params["output"] = output_path
-        params["batch"] = self._tabs.currentIndex() == 1
+        params["clobber"] = self._file_panel.clobber()
 
-        log_panel.clear()
-        log_panel.append_info(f"Starting processing: {input_path}")
+        self._log_panel.clear()
+        self._log_panel.append_info(f"Starting: {', '.join(input_paths)}")
 
         self._process_btn.setText("Cancel")
-        self._progress.setRange(0, 0)  # indeterminate spinner
+        self._progress.setRange(0, 0)
         self._progress.setVisible(True)
         self._status_bar.showMessage("Processing…")
 
         self._worker = ProcessWorker(params)
-        self._worker.log_message.connect(log_panel.append_log)
+        self._worker.log_message.connect(self._log_panel.append_log)
         self._worker.finished.connect(self._on_finished)
         self._worker.start()
 
@@ -216,10 +152,24 @@ class MainWindow(QMainWindow):
         self._progress.setValue(1 if success else 0)
         self._progress.setVisible(False)
 
-        _, _, log_panel = self._active_panels()
         if success:
-            log_panel.append_success(message)
+            self._log_panel.append_success(message)
             self._status_bar.showMessage(f"Done — {message}")
         else:
-            log_panel.append_error(message)
+            self._log_panel.append_error(message)
             self._status_bar.showMessage(f"Failed — {message}")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._initial_sized:
+            return
+        self._initial_sized = True
+
+        content_h = self._settings_panel.contentSizeHint().height()
+        deficit = max(0, content_h - self._settings_panel.height())
+        if deficit == 0:
+            return
+
+        available = self.screen().availableGeometry()
+        new_h = min(self.height() + deficit, available.height() - 80)
+        self.resize(self.width(), new_h)

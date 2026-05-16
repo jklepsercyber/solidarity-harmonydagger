@@ -33,6 +33,7 @@ _COLORS = {
     "error":   "#f38ba8",
     "warn":    "#fab387",
     "dim":     "#6c7086",
+    "cmd":     "#cba6f7",
 }
 
 
@@ -61,7 +62,7 @@ class LogPanel(QWidget):
 
         self._text = QTextEdit()
         self._text.setReadOnly(True)
-        self._text.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self._text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         layout.addWidget(self._text)
 
     # ------------------------------------------------------------------
@@ -76,7 +77,9 @@ class LogPanel(QWidget):
 
     def append_log(self, text: str):
         """Route log-level prefixed strings from the worker."""
-        if text.startswith("ERROR"):
+        if text.startswith("CMD"):
+            self._append(text, _COLORS["cmd"])
+        elif text.startswith("ERROR"):
             self._append(text, _COLORS["error"])
         elif text.startswith("WARNING"):
             self._append(text, _COLORS["warn"])

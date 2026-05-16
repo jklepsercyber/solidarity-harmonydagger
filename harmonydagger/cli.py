@@ -105,6 +105,18 @@ def main():
         help="Convert stereo to mono before processing"
     )
     parser.add_argument(
+        "-c",
+        "--clobber",
+        action="store_true",
+        help="Allow overwriting existing output files (default: error/skip on collision)"
+    )
+    parser.add_argument(
+        "-r",
+        "--recursive",
+        action="store_true",
+        help="Recursively process audio files in sub-folders (only WAV, MP3, FLAC, OGG)"
+    )
+    parser.add_argument(
         "-j",
         "--jobs",
         type=int,
@@ -165,6 +177,10 @@ def main():
             output_path = Path(args.output)
             if output_path.is_dir():
                 output_path = output_path / f"{input_path.stem}_protected{input_path.suffix}"
+
+        if output_path.exists() and not args.clobber:
+            logger.error(f"Output file already exists: {output_path} — use --clobber (-c) to overwrite")
+            return 1
 
         start_time = time.time()
 
@@ -257,12 +273,14 @@ def main():
             audio_extensions = [f".{args.format}"]
             logger.info(f"Processing only {args.format.upper()} files")
 
+        glob_fn = input_path.rglob if args.recursive else input_path.glob
+        if args.recursive:
+            logger.info("Recursive mode enabled — scanning sub-folders")
         audio_files = []
         for ext in audio_extensions:
-            files = list(input_path.glob(f"*{ext}"))
+            files = list(glob_fn(f"*{ext}"))
             audio_files.extend(files)
-            upper_ext = ext.upper()
-            upper_files = list(input_path.glob(f"*{upper_ext}"))
+            upper_files = list(glob_fn(f"*{ext.upper()}"))
             audio_files.extend(upper_files)
             if files or upper_files:
                 logger.info(f"Found {len(files) + len(upper_files)} files with extension {ext}")
@@ -284,6 +302,9 @@ def main():
                 futures = []
                 for audio_file in audio_files:
                     out_file = output_dir / f"{audio_file.stem}_protected{audio_file.suffix}"
+                    if out_file.exists() and not args.clobber:
+                        logger.warning(f"Skipping {audio_file.name}: output already exists — use --clobber (-c) to overwrite")
+                        continue
                     futures.append(
                         executor.submit(
                             process_audio_file,
@@ -319,6 +340,9 @@ def main():
 
             for audio_file in audio_files:
                 out_file = output_dir / f"{audio_file.stem}_protected{audio_file.suffix}"
+                if out_file.exists() and not args.clobber:
+                    logger.warning(f"Skipping {audio_file.name}: output already exists — use --clobber (-c) to overwrite")
+                    continue
                 logger.info(f"Processing: {audio_file.name}")
 
                 success, _, _ = process_audio_file(
